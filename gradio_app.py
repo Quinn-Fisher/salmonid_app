@@ -10,17 +10,16 @@ from pathlib import Path
 from transformers import AutoImageProcessor, AutoModelForObjectDetection
 from boxmot import ByteTrack, BotSort
 from video import process_video
-from config import TrainingConfig
+from config import config
 
 def load_model(model_dir=None):
-    config = TrainingConfig()
     if model_dir is not None:
         checkpoint = model_dir
         device = f"cuda:{config.cuda_device}" if torch.cuda.is_available() else "cpu"
         model = AutoModelForObjectDetection.from_pretrained(checkpoint, local_files_only=True).to(device).eval()
         image_processor = AutoImageProcessor.from_pretrained(checkpoint, local_files_only=True)
     else:
-        checkpoint = getattr(config, 'model_checkpoint', None) or config.model_name
+        checkpoint = config.model_checkpoint
         device = f"cuda:{config.cuda_device}" if torch.cuda.is_available() else "cpu"
         model = AutoModelForObjectDetection.from_pretrained(checkpoint).to(device).eval()
         image_processor = AutoImageProcessor.from_pretrained(checkpoint)
@@ -85,25 +84,28 @@ def evaluate_video_or_zip(input_file, tracker_type, save_annotated_video=True, c
             frame_rate = int(cap.get(cv2.CAP_PROP_FPS))
             cap.release()
 
-            # Initialize a new tracker for each video
+            # Initialize a new tracker for each video (params from config)
             if tracker_type == 'ByteTrack':
                 tracker = ByteTrack(
-                    min_conf=0.11,
-                    track_thresh=0.12,
-                    match_thresh=0.99,
-                    track_buffer=30,
+                    min_conf=config.bytetrack_min_conf,
+                    track_thresh=config.bytetrack_track_thresh,
+                    match_thresh=config.bytetrack_match_thresh,
+                    track_buffer=config.bytetrack_track_buffer,
                     frame_rate=frame_rate
                 )
             elif tracker_type == 'BotSort':
+                weights_path = Path(config.botsort_weights)
+                if not weights_path.is_absolute():
+                    weights_path = Path(__file__).resolve().parent / config.botsort_weights
                 tracker = BotSort(
-                    reid_weights=Path("botsort_weights/osnet_x0_25_msmt17.pt"),
+                    reid_weights=weights_path,
                     device=torch.device(device),
-                    track_high_thresh=0.4,
-                    track_low_thresh=0.3,
-                    new_track_thresh=0.6,
-                    track_buffer=60,
-                    match_thresh=0.8,
-                    half=False,
+                    track_high_thresh=config.botsort_track_high_thresh,
+                    track_low_thresh=config.botsort_track_low_thresh,
+                    new_track_thresh=config.botsort_new_track_thresh,
+                    track_buffer=config.botsort_track_buffer,
+                    match_thresh=config.botsort_match_thresh,
+                    half=config.botsort_half,
                     frame_rate=frame_rate
                 )
 
@@ -116,7 +118,12 @@ def evaluate_video_or_zip(input_file, tracker_type, save_annotated_video=True, c
                 tracker=tracker,
                 save_video=save_annotated_video,
                 output_dir=annotated_dir,
-                device=custom_device
+                device=custom_device,
+                box_score_thresh=config.box_score_thresh,
+                font_path=config.font_path,
+                min_frames_for_track=config.min_frames_for_track,
+                min_displacement_frac=config.min_displacement_frac,
+                min_displacement_px=config.min_displacement_px,
             )
             result_json = json.dumps(counts, indent=2)
             json_path = os.path.splitext(os.path.basename(video_path))[0] + "_count.json"

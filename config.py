@@ -1,36 +1,62 @@
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Optional
 
+
+# Configuration for inference and tracking. No training parameters.
+# Edit these values to change default behavior across the Gradio app and terminal script.
 @dataclass
-class TrainingConfig:
-    # Model settings
-    model_name: str = "PekingU/rtdetr_v2_r50vd"
-    image_size: int = 480
-    
-    # Training settings
-    num_train_epochs: int = 2
-    per_device_train_batch_size: int = 8
-    per_device_eval_batch_size: int = 1
-    learning_rate: float = 5e-5
-    weight_decay: float = 1e-4
-    max_grad_norm: float = 0.01
-    
-    # Data settings
-    dataloader_num_workers: int = 2
-    coco_folder: str = "/path/to/your/coco/dataset"  # Update this path
-    
-    # Output settings
-    output_dir: str = "rt-detr_finetuned"
-    save_total_limit: int = 2
-    
-    # Hardware settings
-    fp16: bool = False
-    cuda_device: str = "0"  # Set to "0" for first GPU, "1" for second, etc.
-    
+class AppConfig:
+
+    # ----- Model (inference only) -----
+    # Default model when no custom model is provided. HuggingFace id or path to local checkpoint.
+    model_checkpoint: str = "PekingU/rtdetr_v2_r50vd"
+    # CUDA device index, e.g. '0' or '1'. Ignored if CUDA not available.
+    cuda_device: str = "0"
+
+    # ----- Detection -----
+    # Detection score threshold. Detections below this are discarded.
+    box_score_thresh: float = 0.6
+
+    # ----- Tracker choice -----
+    # Tracker to use: 'bytetrack' or 'botsort'.
+    tracker: str = "bytetrack"
+
+    # ----- ByteTrack parameters -----
+    bytetrack_min_conf: float = 0.6
+    bytetrack_track_thresh: float = 0.12
+    bytetrack_match_thresh: float = 0.99
+    bytetrack_track_buffer: int = 30
+
+    # ----- BotSort parameters -----
+    # Path to ReID weights file, relative to repo root or absolute.
+    botsort_weights: str = "botsort_weights/osnet_x0_25_msmt17.pt"
+    botsort_track_high_thresh: float = 0.6
+    botsort_track_low_thresh: float = 0.3
+    botsort_new_track_thresh: float = 0.7
+    botsort_track_buffer: int = 60
+    botsort_match_thresh: float = 0.8
+    # Use half precision for ReID (faster, may be less accurate).
+    botsort_half: bool = False
+
+    # ----- Video / process_video -----
+    # Path to font used for on-video annotations.
+    font_path: str = "arial.ttf"
+    # Minimum number of frames a track must have to be included in counts.
+    min_frames_for_track: int = 5
+    # Minimum horizontal movement (fraction of frame width) to assign Left/Right direction.
+    min_displacement_frac: float = 0.05
+    # Minimum horizontal movement in pixels (used together with min_displacement_frac; max of the two is used).
+    min_displacement_px: float = 20.0
+
+    # ----- Output (terminal script defaults) -----
+    # Default directory for saving count JSON and annotated videos when using the terminal script.
+    output_dir: str = "/home/quinn"
+
     def __post_init__(self):
-        # Set CUDA device
         os.environ["CUDA_VISIBLE_DEVICES"] = self.cuda_device
 
-# Create default config
-default_config = TrainingConfig() 
+
+# Default config instance
+config = AppConfig()
