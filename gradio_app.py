@@ -83,6 +83,21 @@ def _gather_videos_from_path(path):
     return []
 
 
+def _display_path_for_json(video_path: str, tmpdir: str) -> str:
+    """
+    Return the path to store in output JSON. Gradio uploads are copied to a temp
+    dir, so we only get a temp path; use the original filename for the JSON.
+    When the path is from the directory-path input, keep the real path.
+    """
+    if not video_path.startswith(tmpdir):
+        return video_path
+    basename = os.path.basename(video_path)
+    # Our copied single/multi uploads: video_0_92.mp4 -> 92.mp4
+    if basename.startswith("video_") and basename.count("_") >= 2:
+        return basename.split("_", 2)[2]
+    return basename
+
+
 def load_model(model_dir=None):
     if model_dir is not None:
         checkpoint = model_dir
@@ -192,16 +207,22 @@ def evaluate_video_or_zip(
                 if len(file_list) == 1 and not directory_path:
                     input_basename = os.path.splitext(name)[0]
 
-        # Optionally add videos from a directory path (e.g. server-side path)
-        if directory_path and directory_path.strip() and os.path.isdir(directory_path.strip()):
-            from_dir = _gather_videos_from_path(directory_path.strip())
-            video_files.extend(from_dir)
-            if not file_list and from_dir:
-                input_basename = os.path.splitext(os.path.basename(from_dir[0]))[0]
+        # Optionally add videos from a path: single file or directory (full path will appear in JSON)
+        if directory_path and directory_path.strip():
+            path = directory_path.strip()
+            if os.path.isdir(path):
+                from_dir = _gather_videos_from_path(path)
+                video_files.extend(from_dir)
+                if not file_list and from_dir:
+                    input_basename = os.path.splitext(os.path.basename(from_dir[0]))[0]
+            elif os.path.isfile(path) and path.lower().endswith(VIDEO_EXTS):
+                video_files.append(path)
+                if not file_list:
+                    input_basename = os.path.splitext(os.path.basename(path))[0]
 
         if not video_files:
             return (
-                "No video files found. Upload one or more videos, a zip of videos, or enter a path to a directory of videos.",
+                "No video files found. Enter a path to a video or directory of videos, or upload one or more videos or a zip.",
                 None,
                 None,
                 None,
@@ -267,6 +288,11 @@ def evaluate_video_or_zip(
             counts["video_recording_time"] = (
                 timestamps.get(video_path, "") if timestamps is not None else ""
             )
+            # Use full path when from path box; filename only when from upload (Gradio only gives temp path)
+            display_path = _display_path_for_json(video_path, tmpdir)
+            for tid, data in counts.items():
+                if isinstance(data, dict) and "video_path" in data:
+                    data["video_path"] = display_path
             result_json = json.dumps(counts, indent=2)
             json_path = os.path.splitext(os.path.basename(video_path))[0] + "_count.json"
             json_full_path = os.path.join(annotated_dir, json_path)
@@ -339,7 +365,7 @@ def evaluate_video_or_zip(
 
 DESCRIPTION = """
 # Salmonid Tracking Video Evaluation
-Upload one or more video files, or a zip of videos, or enter a path to a directory of videos. Set a default model directory path below (optional) and click Save as default so it is remembered next time. You can still upload a custom model zip for a one-off run. The results will be shown as JSON and annotated video(s) will be displayed and available for download.
+Enter a path to a video or directory of videos (full path will appear in the JSON), or optionally upload video(s) or a zip. Set a default model directory path below (optional) and click Save as default so it is remembered next time. You can still upload a custom model zip for a one-off run. The results will be shown as JSON and annotated video(s) will be displayed and available for download.
 """
 
 
@@ -411,12 +437,16 @@ with gr.Blocks(title="Salmonid Tracking Video Evaluation") as iface:
         clear_btn = gr.Button("Clear default")
     model_status_md = gr.Markdown(visible=True)
 
-    video_file = gr.File(label="Upload Video(s) or Zip", file_count="multiple", type="filepath")
+    directory_path = gr.Textbox(
+        label="Path to video or directory",
+        placeholder="/path/to/video.mp4 or /path/to/videos — full path will appear in JSON",
+        value="",
+    )
+    video_file = gr.File(label="Or upload video(s) or zip (optional)", file_count="multiple", type="filepath")
     tracker_type = gr.Dropdown(["ByteTrack", "BotSort"], label="Tracker", value="ByteTrack")
     save_annotated_video = gr.Checkbox(label="Save and display annotated video(s)", value=True)
     custom_model_zip = gr.File(label="Upload Custom Model Zip (optional)", file_count="single", type="filepath")
     recording_log_file = gr.File(label="Upload recording log (optional)", file_count="single", type="filepath")
-    directory_path = gr.Textbox(label="Or path to directory of videos (optional)", placeholder="/path/to/videos", value="")
 
     with gr.Accordion("Tracker & detection settings", open=False):
         box_score_thresh_in = gr.Number(

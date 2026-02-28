@@ -9,14 +9,62 @@ probabilities use full softmax over all logits including the no-object class.
 Output JSON structure and usage: see README.md in this package.
 """
 import os
+import sys
 import cv2
 import numpy as np
 import torch
 import torchvision
+from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
 import imageio.v2 as imageio
 import logging
+
+# Package fonts dir: drop a .ttf here and annotations use it on any OS (size still scaled by video).
+_PACKAGE_FONTS_DIR = Path(__file__).resolve().parent / "fonts"
+
+
+def _annotation_font_candidates(font_path_config):
+    """Return (regular_paths, bold_paths) to try for annotation font. Cross-platform; only cares that size is applied."""
+    regular, bold = [], []
+    # 1. Package fonts dir first — one font here works on every OS
+    if _PACKAGE_FONTS_DIR.is_dir():
+        for p in sorted(_PACKAGE_FONTS_DIR.iterdir()):
+            if p.suffix.lower() in (".ttf", ".ttc", ".otf"):
+                regular.append(str(p))
+        if font_path_config and not os.path.isabs(font_path_config):
+            custom = _PACKAGE_FONTS_DIR / os.path.basename(font_path_config)
+            if custom.is_file() and str(custom) not in regular:
+                regular.insert(0, str(custom))
+    # 2. OS-specific system fonts (order by likelihood)
+    if sys.platform == "darwin":
+        regular += [
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/System/Library/Fonts/SFNSText.ttf",
+            "/Library/Fonts/Arial.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+        ]
+        bold += [
+            "/Library/Fonts/Microsoft/Arial Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+        ]
+    elif sys.platform == "win32":
+        windir = os.environ.get("WINDIR", "C:\\Windows")
+        f = os.path.join(windir, "Fonts", "arial.ttf")
+        regular += [f, os.path.join(windir, "Fonts", "Arial.ttf")]
+        bold += [os.path.join(windir, "Fonts", "arialbd.ttf"), os.path.join(windir, "Fonts", "Arial Bold.ttf")]
+    else:
+        regular += [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        ]
+        bold += [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        ]
+    return regular, bold
 
 # Set up logging
 logging.basicConfig(filename='video_debug.log', level=logging.DEBUG, 
@@ -90,18 +138,11 @@ def process_video(
 
     to_pil = torchvision.transforms.ToPILImage()
 
-    # Load font (size for annotation text). Try config path then common system paths so size is applied.
-    font_size = 32
-    font_candidates = [
-        font_path,
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-    ]
+    # Load a scalable font so size is respected (Pillow's load_default() is tiny and ignores size).
+    font_size = max(44, min(96, int(min(width, height) / 18)))
+    regular_paths, bold_paths = _annotation_font_candidates(font_path)
     font = None
-    for path in font_candidates:
-        if not path:
-            continue
+    for path in regular_paths:
         try:
             font = ImageFont.truetype(path, font_size)
             break
@@ -109,14 +150,8 @@ def process_video(
             continue
     if font is None:
         font = ImageFont.load_default()
-    # Bold font for detection (magenta) box labels
-    bold_candidates = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
-    ]
     font_bold = font
-    for path in bold_candidates:
+    for path in bold_paths:
         try:
             font_bold = ImageFont.truetype(path, font_size)
             break
