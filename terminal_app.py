@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""
+Terminal CLI for salmonid tracking: process video(s) without a UI.
+
+Usage: python terminal_app.py INPUT [--tracker bytetrack|botsort] [--save_video] ...
+Output: per-video JSON (and optionally annotated videos) in --output_dir.
+Installation and full option list: see README.md in this package.
+"""
 import argparse
 import json
 import os
@@ -11,6 +18,7 @@ from transformers import AutoImageProcessor, AutoModelForObjectDetection
 from boxmot import ByteTrack, BotSort
 
 from config import config, AppConfig
+from recording_log import get_video_timestamps
 from video import process_video
 
 
@@ -122,6 +130,12 @@ def main():
         default=config.box_score_thresh,
         help="Detection score threshold.",
     )
+    parser.add_argument(
+        "--log_file",
+        type=str,
+        default=None,
+        help="Optional path to a recording log file (lines like 'YYYY-MM-DD HH:MM:SS - Video recording written to hard disk <name>.mp4'). Used to set video_recording_time in the output JSON. If multiple videos share the same filename, timestamps are omitted.",
+    )
     args = parser.parse_args()
 
     model, image_processor, device = load_model(
@@ -132,6 +146,8 @@ def main():
     video_files = gather_videos(args.input)
     if not video_files:
         raise SystemExit(f"No video files found in {args.input}")
+
+    timestamps = get_video_timestamps(video_files, args.log_file)
 
     for video_path in video_files:
         cap = cv2.VideoCapture(video_path)
@@ -157,6 +173,9 @@ def main():
             min_displacement_px=config.min_displacement_px,
         )
 
+        counts["video_recording_time"] = (
+            timestamps.get(video_path, "") if timestamps is not None else ""
+        )
         print(f"Counts for {video_path}:\n{json.dumps(counts, indent=2)}")
         output_json = os.path.splitext(os.path.basename(video_path))[0] + "_count.json"
         output_json = os.path.join(args.output_dir, output_json)

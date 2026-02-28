@@ -1,3 +1,13 @@
+"""
+Video processing: run object detection and multi-object tracking on a video.
+
+Reads frames, runs the detector (RT-DETR-style), links detections across frames
+with ByteTrack or BotSort, and returns per-fish counts with direction, side,
+entered/exited flags, and class_scores (fish classes + Background). Class
+probabilities use full softmax over all logits including the no-object class.
+
+Output JSON structure and usage: see README.md in this package.
+"""
 import os
 import cv2
 import numpy as np
@@ -13,9 +23,9 @@ logging.basicConfig(filename='video_debug.log', level=logging.DEBUG,
                     format='%(asctime)s - FRAME %(message)s', filemode='w')
 
 
-id2label = {0: 'Chinook', 1: 'Coho', 2: 'Atlantic', 3: 'Rainbow Trout', 4: 'Brown Trout'}
-label2id = {'Chinook': 0, 'Coho': 1, 'Atlantic': 2, 'Rainbow Trout': 3, 'Brown Trout': 4}
-num_classes = len(id2label)
+id2label = {0: 'Chinook', 1: 'Coho', 2: 'Atlantic', 3: 'Rainbow Trout', 4: 'Brown Trout', 5: 'Background'}
+label2id = {'Chinook': 0, 'Coho': 1, 'Atlantic': 2, 'Rainbow Trout': 3, 'Brown Trout': 4, 'Background': 5}
+num_classes = len(id2label)  # 6 (5 fish + Background)
 
 
 def process_video(
@@ -138,12 +148,12 @@ def process_video(
             )[0]
 
         # Per-detection class probabilities (same order as post_process detections).
-        # Model returns raw logits only; we compute softmax ourselves.
+        # Full softmax over all logits including no-object (last dim); we keep Background in class_scores.
         probs = torch.softmax(outputs.logits, dim=-1)
-        prob_no_null = probs[0, :, :-1]  # (num_queries, num_real_classes), no-object dropped
-        scores_per_query = prob_no_null.max(dim=-1).values
+        probs_full = probs[0]  # (num_queries, num_classes) including Background at last index
+        scores_per_query = probs_full[:, :-1].max(dim=-1).values  # max over fish classes for thresholding
         keep = scores_per_query > box_score_thresh
-        class_probs_per_detection = prob_no_null[keep].cpu().numpy()
+        class_probs_per_detection = probs_full[keep].cpu().numpy()
 
         boxes = detections['boxes'].cpu().numpy()
         scores = detections['scores'].cpu().numpy()
@@ -162,7 +172,7 @@ def process_video(
             prob_vec = (
                 class_probs_per_detection[det_ind]
                 if 0 <= det_ind < len(class_probs_per_detection)
-                else np.zeros(num_classes, dtype=np.float64)
+                else np.zeros(num_classes, dtype=np.float64)  # includes Background
             )
 
             if track_id in objects_detected.keys():
@@ -181,8 +191,8 @@ def process_video(
         
 
         
-            if save_video:
-                draw.rectangle([(x1, y1), (x2, y2)], outline="orange", width=5)
+            # if save_video:
+                # draw.rectangle([(x1, y1), (x2, y2)], outline="orange", width=5)
 
         # Draw detection (magenta) boxes with Fish ID + class + score in bold
         if save_video:
@@ -267,18 +277,13 @@ def process_video(
         counts[id]['entered_frame'] = entered_frame
         counts[id]['exited_frame'] = exited_frame
         
-        # Per-class scores: average class probabilities over frames where we had a real detection only.
-        # (Frames with no detection use a zero vector and would drag the average down.)
+        # Per-class scores: average class probabilities over all frames (includes Background).
         class_probs_arr = np.array(objects_detected[id]['class_probs'])
-        has_detection = class_probs_arr.sum(axis=1) > 0.01
-        if has_detection.any():
-            avg_probs = class_probs_arr[has_detection].mean(axis=0)
-        else:
-            avg_probs = class_probs_arr.mean(axis=0)
+        avg_probs = class_probs_arr.mean(axis=0)
         counts[id]['class_scores'] = {
             id2label[c]: float(avg_probs[c]) for c in range(len(id2label))
         }
-        counts[id]['top class'] = id2label[int(np.argmax(avg_probs))]
+        counts[id]['top_class'] = id2label[int(np.argmax(avg_probs))]
 
     return counts
         

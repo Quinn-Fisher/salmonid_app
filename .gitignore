@@ -27,6 +27,9 @@ MANIFEST
 *.db
 *.sqlite3
 
+# Persisted Gradio default model path (user-specific)
+saved_model_path.txt
+
 # Environment
 .env
 .venv

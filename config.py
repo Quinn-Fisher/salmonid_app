@@ -1,3 +1,9 @@
+"""
+Default configuration for the Gradio and terminal apps.
+
+Model checkpoint, detection threshold, tracker choice (ByteTrack/BotSort), and
+tracker parameters. Edit AppConfig defaults to change behavior; see README.md.
+"""
 import os
 from dataclasses import dataclass
 from pathlib import Path
