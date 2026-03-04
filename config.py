@@ -37,12 +37,14 @@ class AppConfig:
 
     # ----- BotSort parameters -----
     # Path to ReID weights file, relative to repo root or absolute.
+    # Defaults aligned with the tuned parameters used in
+    # salmonid_tracking/ytvis_tracker_eval.py.
     botsort_weights: str = "botsort_weights/osnet_x0_25_msmt17.pt"
-    botsort_track_high_thresh: float = 0.6
+    botsort_track_high_thresh: float = 0.8
     botsort_track_low_thresh: float = 0.3
-    botsort_new_track_thresh: float = 0.7
-    botsort_track_buffer: int = 60
-    botsort_match_thresh: float = 0.8
+    botsort_new_track_thresh: float = 0.9
+    botsort_track_buffer: int = 25
+    botsort_match_thresh: float = 0.9
     # Use half precision for ReID (faster, may be less accurate).
     botsort_half: bool = False
 
